@@ -54,8 +54,8 @@ $ varnishlog_exporter -respheader Server -respheader Content-Type
 will export for example:
 ```
 varnish_header_counter{header="Server",type="resp",value="nginx/1.4.6 (Ubuntu)"}
-varnish_header_counter{header="Content-Type",,type="resp",value="text/html"}
-varnish_header_counter{header="Content-Type",,type="resp",value="text/plain"}
+varnish_header_counter{header="Content-Type",type="resp",value="text/html"}
+varnish_header_counter{header="Content-Type",type="resp",value="text/plain"}
 ```
 
 (with each having the count of of the number of requests matching it).
