@@ -71,10 +71,12 @@ const (
 	HITMISS_HIT        = 1
 	HITMISS_MISS       = 2
 	HITMISS_HITFORPASS = 3
-	HITMISS_PIPE       = 4
+	HITMISS_PASS       = 4
+	HITMISS_PIPE       = 5
+	HITMISS_SYNTH      = 6
 )
 
-var HITMISS_STRINGS = []string{"UNKNOWN", "HIT", "MISS", "HITFORPASS", "PIPE"}
+var HITMISS_STRINGS = []string{"UNKNOWN", "HIT", "MISS", "HITFORPASS", "PASS", "PIPE", "SYNTH"}
 
 type SessionCollection struct {
 	hitmiss    int
@@ -273,11 +275,17 @@ func main() {
 					ctx.hitmiss = HITMISS_HITFORPASS
 				}
 				if tag == "VCL_call" {
+					if data == "PASS" && ctx.hitmiss != HITMISS_HITFORPASS {
+						ctx.hitmiss = HITMISS_PASS
+					}
 					if data == "MISS" {
 						ctx.hitmiss = HITMISS_MISS
 					}
 					if data == "PIPE" {
 						ctx.hitmiss = HITMISS_PIPE
+					}
+					if data == "SYNTH" {
+						ctx.hitmiss = HITMISS_SYNTH
 					}
 				}
 				if tag == "ReqAcct" {
