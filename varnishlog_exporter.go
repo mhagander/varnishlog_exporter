@@ -15,41 +15,29 @@ import (
 )
 
 /* Prometheus counters */
-var promcounters = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "varnish_custom_counter",
-		Help: "Varnish Custom counters",
-	},
-	[]string{"key", "hitmiss"},
-)
-var promcountersizes = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "varnish_custom_size",
-		Help: "Varnish Custom sizes",
-	},
-	[]string{"key", "hitmiss"},
-)
-var promheaders = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "varnish_header_counter",
-		Help: "Varnish Header counters",
-	},
-	[]string{"type", "header", "value", "hitmiss"},
-)
-var promheadersizes = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "varnish_header_size",
-		Help: "Varnish Header sizes",
-	},
-	[]string{"type", "header", "value", "hitmiss"},
-)
+var promcounters, promcountersizes *prometheus.CounterVec
+var promstatuses, promstatussizes *prometheus.CounterVec
+var promheaders, promheadersizes *prometheus.CounterVec
 
 /* Accumulator goroutine to make sure we can have a small queue */
 func log_accumulator(subchan chan LogCollInfo) {
 	for {
 		lci := <-subchan
-		promcounters.With(prometheus.Labels{"key": lci.logtag, "hitmiss": HITMISS_STRINGS[lci.hitmiss]}).Inc()
-		promcountersizes.With(prometheus.Labels{"key": lci.logtag, "hitmiss": HITMISS_STRINGS[lci.hitmiss]}).Add(lci.size)
+		labels := prometheus.Labels{"key": lci.logtag, "hitmiss": HITMISS_STRINGS[lci.hitmiss]}
+		if lci.statuscode != "" {
+			labels["statuscode"] = lci.statuscode
+		}
+		promcounters.With(labels).Inc()
+		promcountersizes.With(labels).Add(lci.size)
+	}
+}
+
+func statuscode_accumulator(subchan chan CodeCollInfo) {
+	for {
+		cci := <-subchan
+		labels := prometheus.Labels{"statuscode": cci.statuscode, "hitmiss": HITMISS_STRINGS[cci.hitmiss]}
+		promstatuses.With(labels).Inc()
+		promstatussizes.With(labels).Add(cci.size)
 	}
 }
 
@@ -60,12 +48,20 @@ type HeaderInfo struct {
 }
 
 type LogCollInfo struct {
-	logtag  string
-	hitmiss int
-	size    float64
+	logtag     string
+	hitmiss    int
+	size       float64
+	statuscode string
 }
 type HeaderCollInfo struct {
 	headerinfo HeaderInfo
+	hitmiss    int
+	size       float64
+	statuscode string
+}
+
+type CodeCollInfo struct {
+	statuscode string
 	hitmiss    int
 	size       float64
 }
@@ -81,17 +77,22 @@ const (
 var HITMISS_STRINGS = []string{"UNKNOWN", "HIT", "MISS", "HITFORPASS", "PIPE"}
 
 type SessionCollection struct {
-	hitmiss int
-	size    float64
-	headers []HeaderInfo
-	logtags []string
+	hitmiss    int
+	size       float64
+	statuscode string
+	headers    []HeaderInfo
+	logtags    []string
 }
 
 func header_accumulator(subchan chan HeaderCollInfo) {
 	for {
 		hci := <-subchan
-		promheaders.With(prometheus.Labels{"type": hci.headerinfo.htype, "header": hci.headerinfo.header, "value": hci.headerinfo.value, "hitmiss": HITMISS_STRINGS[hci.hitmiss]}).Inc()
-		promheadersizes.With(prometheus.Labels{"type": hci.headerinfo.htype, "header": hci.headerinfo.header, "value": hci.headerinfo.value, "hitmiss": HITMISS_STRINGS[hci.hitmiss]}).Add(hci.size)
+		labels := prometheus.Labels{"type": hci.headerinfo.htype, "header": hci.headerinfo.header, "value": hci.headerinfo.value, "hitmiss": HITMISS_STRINGS[hci.hitmiss]}
+		if hci.statuscode != "" {
+			labels["statuscode"] = hci.statuscode
+		}
+		promheaders.With(labels).Inc()
+		promheadersizes.With(labels).Add(hci.size)
 	}
 }
 
@@ -132,6 +133,7 @@ func main() {
 		listenAddress = flag.String("web.listen-address", ":9132", "Address to listen on for web interface and telemetry.")
 		metricsPath   = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 		varnishName   = flag.String("varnish.name", "", "Name of varnish instance to connect to.")
+		statusCodes   = flag.Bool("statuscodes", false, "Include statistics per statuscode")
 		showVersion   = flag.Bool("version", false, "Print version information.")
 		debug         = flag.Bool("debug", false, "Print debugging information (lots!).")
 	)
@@ -146,16 +148,77 @@ func main() {
 		os.Exit(0)
 	}
 
+	counterlabels := []string{"key", "hitmiss"}
+	headerlabels := []string{"type", "header", "value", "hitmiss"}
+	if *statusCodes {
+		counterlabels = append(counterlabels, "statuscode")
+		headerlabels = append(headerlabels, "statuscode")
+	}
+	promcounters = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "varnish_custom_counter",
+			Help: "Varnish Custom counters",
+		},
+		counterlabels,
+	)
+	promcountersizes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "varnish_custom_size",
+			Help: "Varnish Custom sizes",
+		},
+		counterlabels,
+	)
+	if *statusCodes {
+		promstatuses = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "varnish_statuscode_counter",
+				Help: "Varnish Statuscode countres",
+			},
+			[]string{"statuscode", "hitmiss"},
+		)
+		promstatussizes = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "varnish_statuscode_size",
+				Help: "Varnish Statuscode sizes",
+			},
+			[]string{"statuscode", "hitmiss"},
+		)
+	}
+	promheaders = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "varnish_header_counter",
+			Help: "Varnish Header counters",
+		},
+		headerlabels,
+	)
+	promheadersizes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "varnish_header_size",
+			Help: "Varnish Header sizes",
+		},
+		headerlabels,
+	)
+
 	prometheus.MustRegister(promcounters)
 	prometheus.MustRegister(promcountersizes)
+	if *statusCodes {
+		prometheus.MustRegister(promstatuses)
+		prometheus.MustRegister(promstatussizes)
+	}
 	if has_headers {
 		prometheus.MustRegister(promheaders)
 		prometheus.MustRegister(promheadersizes)
 	}
 
-	// Separate accommulator routine
+	// Separate accommulator routines
 	log_subchan := make(chan LogCollInfo, 1000)
 	go log_accumulator(log_subchan)
+
+	var statuscode_subchan chan CodeCollInfo
+	if *statusCodes {
+		statuscode_subchan = make(chan CodeCollInfo, 1000)
+		go statuscode_accumulator(statuscode_subchan)
+	}
 
 	header_subchan := make(chan HeaderCollInfo, 1000)
 	if has_headers {
@@ -191,11 +254,17 @@ func main() {
 				}
 				if tag == "End" {
 					for _, l := range ctx.logtags {
-						log_subchan <- LogCollInfo{l, ctx.hitmiss, ctx.size}
+						log_subchan <- LogCollInfo{l, ctx.hitmiss, ctx.size, ctx.statuscode}
 					}
 					for _, h := range ctx.headers {
-						header_subchan <- HeaderCollInfo{h, ctx.hitmiss, ctx.size}
+						header_subchan <- HeaderCollInfo{h, ctx.hitmiss, ctx.size, ctx.statuscode}
 					}
+					if *statusCodes {
+						statuscode_subchan <- CodeCollInfo{ctx.statuscode, ctx.hitmiss, ctx.size}
+					}
+				}
+				if *statusCodes && tag == "RespStatus" {
+					ctx.statuscode = data
 				}
 				if tag == "Hit" {
 					ctx.hitmiss = HITMISS_HIT
