@@ -114,20 +114,20 @@ func httpServer(listenAddress string, metricsPath string) {
 }
 
 /* Map options for headers, for quick lookup */
-type flagStringArray map[string]bool
+type flagLowerStringArray map[string]bool
 
-func (i *flagStringArray) String() string {
+func (i *flagLowerStringArray) String() string {
 	return "notused"
 }
 
-func (i flagStringArray) Set(value string) error {
-	i[value] = true
+func (i flagLowerStringArray) Set(value string) error {
+	i[strings.ToLower(value)] = true
 	return nil
 }
 
 func main() {
-	var reqheaders = make(flagStringArray)
-	var respheaders = make(flagStringArray)
+	var reqheaders = make(flagLowerStringArray)
+	var respheaders = make(flagLowerStringArray)
 	flag.Var(&reqheaders, "reqheader", "Request header to include")
 	flag.Var(&respheaders, "respheader", "Response header to include")
 
@@ -303,13 +303,13 @@ func main() {
 					ctx.logtags = append(ctx.logtags, data[7:])
 				}
 				if has_reqheaders && tag == "ReqHeader" {
-					pieces := strings.SplitN(data, ": ", 2)
+					pieces := strings.SplitN(strings.ToLower(data), ": ", 2)
 					if _, exists := reqheaders[pieces[0]]; exists {
 						ctx.headers = append(ctx.headers, HeaderInfo{htype: "req", header: pieces[0], value: pieces[1]})
 					}
 				}
 				if has_respheaders && tag == "RespHeader" {
-					pieces := strings.SplitN(data, ": ", 2)
+					pieces := strings.SplitN(strings.ToLower(data), ": ", 2)
 					if _, exists := respheaders[pieces[0]]; exists {
 						ctx.headers = append(ctx.headers, HeaderInfo{htype: "resp", header: pieces[0], value: pieces[1]})
 					}
