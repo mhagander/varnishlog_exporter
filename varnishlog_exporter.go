@@ -232,6 +232,7 @@ func main() {
 
 	for {
 		ctx := SessionCollection{}
+		collecting := false
 
 		// Open the default Varnish Shared Memory file
 		c := vago.Config{}
@@ -253,17 +254,21 @@ func main() {
 
 				if tag == "Begin" && strings.HasPrefix(data, "req") {
 					ctx = SessionCollection{}
+					collecting = true
 				}
 				if tag == "End" {
-					for _, l := range ctx.logtags {
-						log_subchan <- LogCollInfo{l, ctx.hitmiss, ctx.size, ctx.statuscode}
+					if collecting {
+						for _, l := range ctx.logtags {
+							log_subchan <- LogCollInfo{l, ctx.hitmiss, ctx.size, ctx.statuscode}
+						}
+						for _, h := range ctx.headers {
+							header_subchan <- HeaderCollInfo{h, ctx.hitmiss, ctx.size, ctx.statuscode}
+						}
+						if *statusCodes {
+							statuscode_subchan <- CodeCollInfo{ctx.statuscode, ctx.hitmiss, ctx.size}
+						}
 					}
-					for _, h := range ctx.headers {
-						header_subchan <- HeaderCollInfo{h, ctx.hitmiss, ctx.size, ctx.statuscode}
-					}
-					if *statusCodes {
-						statuscode_subchan <- CodeCollInfo{ctx.statuscode, ctx.hitmiss, ctx.size}
-					}
+					collecting = false
 				}
 				if *statusCodes && tag == "RespStatus" {
 					ctx.statuscode = data
