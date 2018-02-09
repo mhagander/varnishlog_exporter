@@ -58,7 +58,7 @@ varnish_header_counter{header="Content-Type",type="resp",value="text/html"}
 varnish_header_counter{header="Content-Type",type="resp",value="text/plain"}
 ```
 
-(with each having the count of of the number of requests matching it).
+(with each having the count of the number of requests matching it).
 
 ## Usage
 
