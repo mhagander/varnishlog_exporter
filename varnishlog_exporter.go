@@ -174,7 +174,7 @@ func main() {
 		promstatuses = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "varnish_statuscode_counter",
-				Help: "Varnish Statuscode countres",
+				Help: "Varnish Statuscode counters",
 			},
 			[]string{"statuscode", "hitmiss"},
 		)
