@@ -60,12 +60,30 @@ varnish_header_counter{header="Content-Type",type="resp",value="text/plain"}
 
 (with each having the count of the number of requests matching it).
 
+### Tracking status codes
+
+If `-statuscodes` is included on the commandline, per-statuscode
+statistics are collected. These are both collected as a label on
+`varnish_header_counter`, and as a global metrics with the total
+number of requests and size.
+
+### Tracking http versions
+
+If `-httpversions` is included on the commandline, metrics are
+collected for http versions. This is done by looking at the
+`ReqProtocol` value in Varnish, and will collect on number of requests
+and total size of those requests.
+
 ## Usage
 
+	-httpversions
+		Include statistics per http version
     -reqheader value
       	Request header to include
     -respheader value
       	Response header to include
+	-statuscodes
+		Include statistics per statuscode
     -varnish.name string
       	Name of varnish instance to connect to.
     -version
