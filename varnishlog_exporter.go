@@ -17,6 +17,7 @@ import (
 /* Prometheus counters */
 var promcounters, promcountersizes *prometheus.CounterVec
 var promstatuses, promstatussizes *prometheus.CounterVec
+var promversions, promversionsizes *prometheus.CounterVec
 var promheaders, promheadersizes *prometheus.CounterVec
 
 /* Accumulator goroutine to make sure we can have a small queue */
@@ -38,6 +39,15 @@ func statuscode_accumulator(subchan chan CodeCollInfo) {
 		labels := prometheus.Labels{"statuscode": cci.statuscode, "hitmiss": HITMISS_STRINGS[cci.hitmiss]}
 		promstatuses.With(labels).Inc()
 		promstatussizes.With(labels).Add(cci.size)
+	}
+}
+
+func httpversion_accumulator(subchan chan VersionCollInfo) {
+	for {
+		vci := <-subchan
+		labels := prometheus.Labels{"httpversion": vci.httpversion}
+		promversions.With(labels).Inc()
+		promversionsizes.With(labels).Add(vci.size)
 	}
 }
 
@@ -66,6 +76,11 @@ type CodeCollInfo struct {
 	size       float64
 }
 
+type VersionCollInfo struct {
+	httpversion string
+	size        float64
+}
+
 const (
 	HITMISS_UNKNOWN    = 0
 	HITMISS_HIT        = 1
@@ -79,11 +94,12 @@ const (
 var HITMISS_STRINGS = []string{"UNKNOWN", "HIT", "MISS", "HITFORPASS", "PASS", "PIPE", "SYNTH"}
 
 type SessionCollection struct {
-	hitmiss    int
-	size       float64
-	statuscode string
-	headers    []HeaderInfo
-	logtags    []string
+	hitmiss     int
+	size        float64
+	statuscode  string
+	httpversion string
+	headers     []HeaderInfo
+	logtags     []string
 }
 
 func header_accumulator(subchan chan HeaderCollInfo) {
@@ -136,6 +152,7 @@ func main() {
 		metricsPath   = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 		varnishName   = flag.String("varnish.name", "", "Name of varnish instance to connect to.")
 		statusCodes   = flag.Bool("statuscodes", false, "Include statistics per statuscode")
+		httpVersions  = flag.Bool("httpversions", false, "Include statistics per http version")
 		showVersion   = flag.Bool("version", false, "Print version information.")
 		debug         = flag.Bool("debug", false, "Print debugging information (lots!).")
 	)
@@ -186,6 +203,22 @@ func main() {
 			[]string{"statuscode", "hitmiss"},
 		)
 	}
+	if *httpVersions {
+		promversions = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "varnish_httpversion_counter",
+				Help: "Varnish httpversion counters",
+			},
+			[]string{"httpversion"},
+		)
+		promversionsizes = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "varnish_httpversion_size",
+				Help: "Varnish httpversion sizes",
+			},
+			[]string{"httpversion"},
+		)
+	}
 	promheaders = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "varnish_header_counter",
@@ -207,6 +240,10 @@ func main() {
 		prometheus.MustRegister(promstatuses)
 		prometheus.MustRegister(promstatussizes)
 	}
+	if *httpVersions {
+		prometheus.MustRegister(promversions)
+		prometheus.MustRegister(promversionsizes)
+	}
 	if has_headers {
 		prometheus.MustRegister(promheaders)
 		prometheus.MustRegister(promheadersizes)
@@ -220,6 +257,12 @@ func main() {
 	if *statusCodes {
 		statuscode_subchan = make(chan CodeCollInfo, 1000)
 		go statuscode_accumulator(statuscode_subchan)
+	}
+
+	var httpversion_subchan chan VersionCollInfo
+	if *httpVersions {
+		httpversion_subchan = make(chan VersionCollInfo, 1000)
+		go httpversion_accumulator(httpversion_subchan)
 	}
 
 	header_subchan := make(chan HeaderCollInfo, 1000)
@@ -267,11 +310,17 @@ func main() {
 						if *statusCodes {
 							statuscode_subchan <- CodeCollInfo{ctx.statuscode, ctx.hitmiss, ctx.size}
 						}
+						if *httpVersions {
+							httpversion_subchan <- VersionCollInfo{ctx.httpversion, ctx.size}
+						}
 					}
 					collecting = false
 				}
 				if *statusCodes && tag == "RespStatus" {
 					ctx.statuscode = data
+				}
+				if *httpVersions && tag == "ReqProtocol" {
+					ctx.httpversion = data
 				}
 				if tag == "Hit" {
 					ctx.hitmiss = HITMISS_HIT
