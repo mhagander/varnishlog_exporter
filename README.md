@@ -8,11 +8,7 @@ headers and reports the accumulated counts.
 
 ## Exported metrics
 
-`varnishlog_exporter` can export 3 types of metrics. For each type,
-multiple counters can be exported, and will be created dynamically
-based on the data that shows up in the log.
-
-### custom log metrics
+### Cstom log metrics
 
 At any point in the VCL code, it can be decorated with a log message
 of the format `logkey:something`. This will generate a metric of type
