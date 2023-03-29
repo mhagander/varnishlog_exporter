@@ -19,6 +19,7 @@ var promcounters, promcountersizes *prometheus.CounterVec
 var promstatuses, promstatussizes *prometheus.CounterVec
 var promversions, promversionsizes *prometheus.CounterVec
 var promheaders, promheadersizes *prometheus.CounterVec
+var promprobes *prometheus.SummaryVec
 
 /* Accumulator goroutine to make sure we can have a small queue */
 func log_accumulator(subchan chan LogCollInfo) {
@@ -51,6 +52,13 @@ func httpversion_accumulator(subchan chan VersionCollInfo) {
 	}
 }
 
+func probe_accumulator(subchan chan ProbeCollInfo) {
+	for {
+		pci := <-subchan
+		promprobes.WithLabelValues(pci.probename).Observe(pci.responsetime)
+	}
+}
+
 type HeaderInfo struct {
 	htype  string
 	header string
@@ -79,6 +87,11 @@ type CodeCollInfo struct {
 type VersionCollInfo struct {
 	httpversion string
 	size        float64
+}
+
+type ProbeCollInfo struct {
+	probename    string
+	responsetime float64
 }
 
 const (
@@ -153,6 +166,7 @@ func main() {
 		varnishName   = flag.String("varnish.name", "", "Name of varnish instance to connect to.")
 		statusCodes   = flag.Bool("statuscodes", false, "Include statistics per statuscode")
 		httpVersions  = flag.Bool("httpversions", false, "Include statistics per http version")
+		probes        = flag.Bool("probes", false, "Include statitics for probes")
 		showVersion   = flag.Bool("version", false, "Print version information.")
 		debug         = flag.Bool("debug", false, "Print debugging information (lots!).")
 	)
@@ -219,6 +233,15 @@ func main() {
 			[]string{"httpversion"},
 		)
 	}
+	if *probes {
+		promprobes = prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Name: "varnish_probe_responsetime",
+				Help: "Response time for varnish probes",
+			},
+			[]string{"name"},
+		)
+	}
 	promheaders = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "varnish_header_counter",
@@ -243,6 +266,9 @@ func main() {
 	if *httpVersions {
 		prometheus.MustRegister(promversions)
 		prometheus.MustRegister(promversionsizes)
+	}
+	if *probes {
+		prometheus.MustRegister(promprobes)
 	}
 	if has_headers {
 		prometheus.MustRegister(promheaders)
@@ -272,6 +298,47 @@ func main() {
 
 	// Http listener
 	go httpServer(*listenAddress, *metricsPath)
+
+	if *probes {
+		// When collecting probes we run a separate goroutine that parses the VSL
+		// independently, because we need to parse it in RAW mode, not grouped by
+		// request.
+		go func() {
+			var probe_subchan chan ProbeCollInfo
+			if *probes {
+				probe_subchan = make(chan ProbeCollInfo, 1000)
+				go probe_accumulator(probe_subchan)
+			}
+
+			for {
+				c := vago.Config{}
+				c.Path = *varnishName
+				v, err := vago.Open(&c)
+				if err != nil {
+					fmt.Println(err)
+					time.Sleep(5 * time.Second)
+					continue
+				}
+
+				v.Log("",
+					vago.RAW,
+					vago.COPT_TAIL|vago.COPT_BATCH,
+					func(vxid uint32, tag, _type, data string) int {
+						if tag == "Backend_health" {
+							fmt.Printf("vxid %d, tag %s, type %s, data %s\n", vxid, tag, _type, data)
+							pieces := strings.Split(data, " ")
+							timing, err := strconv.ParseFloat(pieces[7], 64)
+							if err == nil {
+								probe_subchan <- ProbeCollInfo{pieces[0][strings.LastIndex(pieces[0], ".")+1:], timing}
+							}
+						}
+
+						return 0
+					},
+				)
+			}
+		}()
+	}
 
 	for {
 		ctx := SessionCollection{}

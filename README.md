@@ -70,10 +70,18 @@ collected for http versions. This is done by looking at the
 `ReqProtocol` value in Varnish, and will collect on number of requests
 and total size of those requests.
 
+### Tracking probe response times
+
+If `-probes` is included on the commandline, metrics are collected for
+probe response times. Each probe will be recorded as a Summary,
+meaning it will get a count and a sum.
+
 ## Usage
 
 	-httpversions
 		Include statistics per http version
+	-probes
+		Inlcude probe statistics
     -reqheader value
       	Request header to include
     -respheader value
